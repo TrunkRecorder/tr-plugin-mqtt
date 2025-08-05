@@ -1,4 +1,7 @@
-# Trunk Recorder MQTT Status (and Units!) Plugin <!-- omit from toc -->
+<img src="https://raw.githubusercontent.com/TrunkRecorder/trunk-recorder/refs/heads/master/docs/media/trunk-recorder-header.png" width="75%" height="75%">
+
+[![Discord](https://raw.githubusercontent.com/TrunkRecorder/trunk-recorder/refs/heads/master/docs/media/discord.jpg)](https://discord.gg/btJAhESnks) &nbsp;&nbsp;
+# Trunk Recorder MQTT Plugin <!-- omit from toc -->
 
 This is a plugin for Trunk Recorder that publish the current status over MQTT. External programs can use the MQTT messages to collect and display information on monitored systems.
 
