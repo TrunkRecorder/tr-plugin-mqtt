@@ -213,23 +213,6 @@ mqtt {
 
 ## Docker
 
-The included Dockerfile will allow building a trunk-recorder docker image with this plugin included.
+A [prebuilt docker image](https://hub.docker.com/r/thegreatcodeholio/trunk-recorder-mqtt) containing Trunk Recorder and this MQTT plugin is also available via a [community respository](https://github.com/TheGreatCodeholio/trunk-recorder-mqtt).
 
-`docker-compose` can be used to automate the build and deployment of this image. In the Docker compose file replace the image line with a build line pointing to the location where this repo has been cloned to.
-
-Docker compose file:
-
-```yaml
-version: "3"
-services:
-  recorder:
-    build: ./trunk-recorder-mqtt-status
-    container_name: trunk-recorder
-    restart: always
-    privileged: true
-    volumes:
-      - /dev/bus/usb:/dev/bus/usb
-      - /var/run/dbus:/var/run/dbus
-      - /var/run/avahi-daemon/socket:/var/run/avahi-daemon/socket
-      - ./:/app
-```
+`thegreatcodeholio/trunk-recorder-mqtt:latest`
