@@ -59,7 +59,7 @@ sudo ldconfig
 ```bash
 cd [your trunk-recorder github source directory]
 cd user_plugins
-git clone https://github.com/taclane/trunk-recorder-mqtt-status
+git clone https://github.com/TrunkRecorder/tr-plugin-mqtt
 cd [your trunk-recorder build directory]
 sudo make install
 ```
