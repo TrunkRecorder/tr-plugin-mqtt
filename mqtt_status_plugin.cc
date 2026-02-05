@@ -1261,10 +1261,30 @@ public:
 
   // connected()
   //   Paho MQTT: This method is called if the connection to the broker is activated.
+  //   Resends retained messages (config, systems, connection status) on reconnection
+  //   to handle ephemeral broker instances that don't persist retained messages.
   void connected(const string &cause)
   {
     BOOST_LOG_TRIVIAL(info) << log_prefix << "Connected to broker: " << mqtt_broker << " " << cause;
     mqtt_connected = true;
+
+    // Resend retained messages after reconnection
+    send_config(tr_sources, tr_systems);
+    setup_systems(tr_systems);
+
+    // Resend connection status
+    std::string topic_lwt = topic_status + "/trunk_recorder/status";
+    json status_msg = {
+        {"status", "connected"},
+        {"instance_id", tr_instance_id},
+        {"client_id", mqtt_client_id}};
+    mqtt::message_ptr conn_msg = mqtt::message_ptr_builder()
+                                     .topic(topic_lwt)
+                                     .payload(status_msg.dump())
+                                     .qos(mqtt_qos)
+                                     .retained(true)
+                                     .finalize();
+    mqtt_client->publish(conn_msg);
   }
 
   // ********************************
