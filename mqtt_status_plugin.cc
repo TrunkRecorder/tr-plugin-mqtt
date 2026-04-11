@@ -690,6 +690,26 @@ public:
     return 0;
   }
 
+  // unit_call_alert()
+  //   Directed unit-to-unit page (call_alert)
+  //   TRUNK-RECORDER PLUGIN API: Called each CALL_ALERT message
+  //   MQTT: topic_unit/shortname/call_alert
+  int unit_call_alert(System *sys, long source_id, long target_unit) override
+  {
+    if (unit_enabled)
+    {
+      nlohmann::ordered_json unit_json = {
+          {"sys_num", sys->get_sys_num()},
+          {"sys_name", sys->get_short_name()},
+          {"unit", source_id},
+          {"unit_alpha_tag", sys->find_unit_tag(source_id)},
+          {"target_unit", target_unit},
+          {"target_unit_alpha_tag", sys->find_unit_tag(target_unit)}};
+      return send_json(unit_json, "call_alert", "call_alert", topic_unit + "/" + sys->get_short_name().c_str(), false);
+    }
+    return 0;
+  }
+
   // unit_location()
   //   Unit location/roaming update (location)
   //   TRUNK-RECORDER PLUGIN API: Called each LOCATION message
