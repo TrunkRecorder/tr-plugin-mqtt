@@ -164,6 +164,11 @@ const char *mqtt_transport_name()
   return "paho";
 }
 
+bool mqtt_transport_supports(int version)
+{
+  return (version == 3) || (version == 5);
+}
+
 std::unique_ptr<Mqtt_Transport> make_mqtt_transport()
 {
   return std::unique_ptr<Mqtt_Transport>(new Paho_Transport());

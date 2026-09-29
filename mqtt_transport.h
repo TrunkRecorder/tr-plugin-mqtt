@@ -62,6 +62,7 @@ public:
 
 // Provided by the compiled transport
 const char *mqtt_transport_name();
+bool mqtt_transport_supports(int version);
 std::unique_ptr<Mqtt_Transport> make_mqtt_transport();
 
 #endif
