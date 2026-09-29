@@ -6,6 +6,7 @@ set(PahoMqttCpp_LIBRARIES PahoMqttCpp::paho-mqttpp3)
 add_library(mqtt_status_plugin
 MODULE
   mqtt_status_plugin.cc
+  mqtt_transport_paho.cc
 )
 
 include_directories(

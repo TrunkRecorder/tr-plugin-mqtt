@@ -19,7 +19,8 @@
 #include <chrono>
 #include <condition_variable>
 #include <algorithm>
-#include <mqtt/client.h>
+#include <memory>
+#include "mqtt_transport.h"
 
 // Trunk-Recorder headers
 #include "../../trunk-recorder/source.h"
@@ -41,11 +42,10 @@
 using namespace std;
 namespace logging = boost::log;
 
-class Mqtt_Status : public Plugin_Api, public virtual mqtt::callback
+class Mqtt_Status : public Plugin_Api
 {
-  // Paho MQTT
-  mqtt::async_client *mqtt_client = nullptr;
-  mqtt::connect_options mqtt_conn_opts;
+  // MQTT transport (see mqtt_transport.h)
+  std::unique_ptr<Mqtt_Transport> transport;
   std::atomic<bool> mqtt_connected{false};
   std::atomic<bool> resend_retained{false};
 
@@ -801,6 +801,7 @@ public:
       topic_console = topic_status + "/trunk_recorder";
 
     // Print plugin startup info
+    BOOST_LOG_TRIVIAL(info) << log_prefix << "MQTT Library:           " << mqtt_transport_name();
     BOOST_LOG_TRIVIAL(info) << log_prefix << "Broker:                 " << mqtt_broker;
     BOOST_LOG_TRIVIAL(info) << log_prefix << "Username:               " << mqtt_username;
     BOOST_LOG_TRIVIAL(info) << log_prefix << "Password:               " << ((mqtt_password == "") ? "[none]" : "********");
@@ -842,6 +843,7 @@ public:
   int start() override
   {
     log_prefix = "[MQTT Status]\t";
+    transport = make_mqtt_transport();
     start_publish_worker();
     // Start the MQTT connection; config and systems are sent by poll_one() once connected
     open_connection();
@@ -872,37 +874,29 @@ public:
     stop_publish_worker();
 
     // Disconnect from MQTT broker if connected
-    if (mqtt_client && mqtt_connected) {
-      try {
-        // Publish disconnection status message
-        std::string topic_lwt = topic_status + "/trunk_recorder/status";
-        json status_msg = {
-            {"status", "disconnected"},
-            {"instance_id", tr_instance_id},
-            {"client_id", mqtt_client_id}};
-        
-        mqtt::message_ptr disc_msg = mqtt::message_ptr_builder()
-                                         .topic(topic_lwt)
-                                         .payload(status_msg.dump())
-                                         .qos(mqtt_qos)
-                                         .retained(true)
-                                         .finalize();
-        mqtt_client->publish(disc_msg)->wait_for(std::chrono::seconds(2));
-        
-        // Disconnect from broker
-        mqtt_client->disconnect()->wait_for(std::chrono::seconds(5));
-        mqtt_connected = false;
+    if (transport && mqtt_connected) {
+      // Publish disconnection status message
+      std::string topic_lwt = topic_status + "/trunk_recorder/status";
+      json status_msg = {
+          {"status", "disconnected"},
+          {"instance_id", tr_instance_id},
+          {"client_id", mqtt_client_id}};
+
+      Mqtt_Delivery_Ptr disc_msg = transport->publish(topic_lwt, status_msg.dump(), mqtt_qos, true);
+      if (disc_msg)
+        disc_msg->wait_for(std::chrono::seconds(2));
+
+      // Disconnect from broker
+      std::string error = transport->disconnect(std::chrono::seconds(5));
+      mqtt_connected = false;
+      if (error.empty())
         BOOST_LOG_TRIVIAL(info) << log_prefix << "Disconnected from MQTT broker";
-      } catch (const mqtt::exception &exc) {
-        BOOST_LOG_TRIVIAL(error) << log_prefix << "Error during disconnect: " << exc.what();
-      }
+      else
+        BOOST_LOG_TRIVIAL(error) << log_prefix << "Error during disconnect: " << error;
     }
-    
+
     // Clean up MQTT client
-    if (mqtt_client) {
-      delete mqtt_client;
-      mqtt_client = nullptr;
-    }
+    transport.reset();
     
     BOOST_LOG_TRIVIAL(info) << log_prefix << "MQTT client stopped";
     return 0;
@@ -1204,79 +1198,46 @@ public:
   }
 
   // ********************************
-  // Paho MQTT
+  // MQTT connection
   // ********************************
 
   // open_connection()
-  //   Open the connection to the destination MQTT server using paho libraries.
+  //   Open the connection to the destination MQTT server through the transport.
   //   The broker sends the disconnect message; connected() queues the connect message.
   //   MQTT: topic_message/status/trunk_recorder/status
   void open_connection()
   {
     // Set a disconnect message between client and broker
-    std::string topic_lwt = topic_status + "/trunk_recorder/status";
-
     json status_msg = {
         {"status", "disconnected"},
         {"instance_id", tr_instance_id},
         {"client_id", mqtt_client_id}};
 
-    std::string lwt_json = status_msg.dump();
-    auto will_msg = mqtt::message(topic_lwt, lwt_json.c_str(), strlen(lwt_json.c_str()), mqtt_qos, true);
+    Mqtt_Settings settings;
+    settings.broker = mqtt_broker;
+    settings.client_id = mqtt_client_id;
+    settings.username = mqtt_username;
+    settings.password = mqtt_password;
+    settings.version = mqtt_version;
+    settings.qos = mqtt_qos;
+    settings.will_topic = topic_status + "/trunk_recorder/status";
+    settings.will_payload = status_msg.dump();
 
-    // Set SSL options
-    mqtt::ssl_options sslopts = mqtt::ssl_options_builder()
-                                    .verify(false)
-                                    .enable_server_cert_auth(false)
-                                    .finalize();
-
-    // Set connection options; kept for reconnecting after a missed heartbeat
-    mqtt_conn_opts = mqtt::connect_options_builder()
-                         .clean_session()
-                         .ssl(sslopts)
-                         .automatic_reconnect(std::chrono::seconds(10), std::chrono::seconds(40))
-                         .will(will_msg)
-                         .finalize();
-
-    // Set user/pass if indicated
     if ((mqtt_username != "") && (mqtt_password != ""))
-    {
       BOOST_LOG_TRIVIAL(info) << log_prefix << "Setting MQTT Broker username and password..." << endl;
-      mqtt_conn_opts.set_user_name(mqtt_username);
-      mqtt_conn_opts.set_password(mqtt_password);
-    }
 
-    // MQTT 5 replaces clean session with clean start
-    if (mqtt_version == 5)
-    {
-      mqtt_conn_opts.set_mqtt_version(MQTTVERSION_5);
-      mqtt_conn_opts.set_clean_start(true);
-    }
+    Mqtt_Events events;
+    events.connected = [this](const std::string &cause) { connected(cause); };
+    events.connection_lost = [this](const std::string &cause) { connection_lost(cause); };
+    events.broker_disconnect = [this](const std::string &reason) { broker_disconnect(reason); };
 
-    // Open a connection to the broker, connected() sets mqtt_connected true if successful
-    mqtt_client = new mqtt::async_client(mqtt_broker, mqtt_client_id, mqtt::create_options((mqtt_version == 5) ? MQTTVERSION_5 : MQTTVERSION_DEFAULT));
-    mqtt_client->set_callback(*this);
-
-    // MQTT 5 brokers report why they closed the connection
-    if (mqtt_version == 5)
+    // connected() sets mqtt_connected true if successful
+    BOOST_LOG_TRIVIAL(info) << log_prefix << "Connecting...";
+    BOOST_LOG_TRIVIAL(info) << log_prefix << "Waiting for the connection...";
+    std::string error = transport->connect(settings, events);
+    if (!error.empty())
     {
-      mqtt_client->set_disconnected_handler([this](const mqtt::properties &, mqtt::ReasonCode reason)
-                                            {
-                                              mqtt_connected = false;
-                                              BOOST_LOG_TRIVIAL(error) << log_prefix << "Broker closed the connection: " << mqtt::exception::reason_code_str(reason);
-                                            });
-    }
-
-    try
-    {
-      BOOST_LOG_TRIVIAL(info) << log_prefix << "Connecting...";
-      mqtt::token_ptr conntok = mqtt_client->connect(mqtt_conn_opts);
-      BOOST_LOG_TRIVIAL(info) << log_prefix << "Waiting for the connection...";
-      conntok->wait();
-    }
-    catch (const mqtt::exception &exc)
-    {
-      BOOST_LOG_TRIVIAL(error) << log_prefix << exc.what() << endl;
+      BOOST_LOG_TRIVIAL(error) << log_prefix << error << endl;
       if (mqtt_version == 5)
         BOOST_LOG_TRIVIAL(error) << log_prefix << "If the broker does not support MQTT 5, set \"mqtt_version\": 3";
     }
@@ -1312,25 +1273,6 @@ public:
 
     enqueue(object_topic + "/" + type, std::move(payload_str), retained, coalesce, max_age);
     return 0;
-  }
-
-  // publish()
-  //   Hand a message to paho. Returns nullptr if it is refused (e.g. the connection just dropped).
-  mqtt::delivery_token_ptr publish(const std::string &topic, const std::string &payload, int qos, bool retained)
-  {
-    try
-    {
-      return mqtt_client->publish(mqtt::message_ptr_builder()
-                                      .topic(topic)
-                                      .payload(payload)
-                                      .qos(qos)
-                                      .retained(retained)
-                                      .finalize());
-    }
-    catch (const mqtt::exception &)
-    {
-      return nullptr;
-    }
   }
 
   // ********************************
@@ -1431,15 +1373,15 @@ public:
   }
 
   // publish_worker()
-  //   Publish queued messages while connected, keeping at most MAX_IN_FLIGHT inside paho so a
-  //   stalled connection backs up here, where age and size limits apply. A QoS 1 heartbeat
-  //   detects connections that stop delivering; QoS 0 traffic alone never gets a reply.
-  //   queue_mutex is released around every paho call.
+  //   Publish queued messages while connected, keeping at most MAX_IN_FLIGHT inside the MQTT
+  //   library so a stalled connection backs up here, where age and size limits apply. A QoS 1
+  //   heartbeat detects connections that stop delivering; QoS 0 traffic alone never gets a reply.
+  //   queue_mutex is released around every transport call.
   void publish_worker()
   {
     typedef std::chrono::steady_clock clock;
-    std::deque<std::pair<mqtt::delivery_token_ptr, clock::time_point>> in_flight;
-    mqtt::delivery_token_ptr heartbeat_tok;
+    std::deque<std::pair<Mqtt_Delivery_Ptr, clock::time_point>> in_flight;
+    Mqtt_Delivery_Ptr heartbeat_tok;
     clock::time_point heartbeat_sent;
     clock::time_point next_heartbeat = clock::now() + std::chrono::seconds(heartbeat_interval);
     clock::time_point next_purge = clock::now();
@@ -1468,18 +1410,13 @@ public:
       }
       lock.unlock();
 
-      // Paho reconnects on its own after a lost connection, but not after disconnect()
+      // The transport reconnects on its own after a lost connection, but not after disconnect()
       if (reconnect_pending && (now >= next_reconnect))
       {
-        try
-        {
-          mqtt_client->connect(mqtt_conn_opts);
+        if (transport->reconnect())
           reconnect_pending = false;
-        }
-        catch (const mqtt::exception &)
-        {
+        else
           next_reconnect = now + std::chrono::seconds(5);
-        }
       }
 
       if (!mqtt_connected)
@@ -1498,13 +1435,7 @@ public:
           BOOST_LOG_TRIVIAL(warning) << log_prefix << "Heartbeat not acknowledged within " << heartbeat_timeout << "s, reconnecting to broker: " << mqtt_broker;
           heartbeat_tok.reset();
           in_flight.clear();
-          try
-          {
-            mqtt_client->disconnect(0)->wait_for(std::chrono::seconds(2));
-          }
-          catch (const mqtt::exception &)
-          {
-          }
+          transport->disconnect(std::chrono::seconds(2));
           reconnect_pending = true;
           next_reconnect = now;
         }
@@ -1514,13 +1445,13 @@ public:
               {"type", "heartbeat"},
               {"timestamp", time(NULL)},
               {"instance_id", tr_instance_id}};
-          heartbeat_tok = publish(topic_status + "/trunk_recorder/heartbeat", heartbeat_json.dump(), 1, false);
+          heartbeat_tok = transport->publish(topic_status + "/trunk_recorder/heartbeat", heartbeat_json.dump(), 1, false);
           heartbeat_sent = now;
           next_heartbeat = now + std::chrono::seconds(heartbeat_interval);
         }
       }
 
-      // Forget delivered messages, and any paho never completes
+      // Forget delivered messages, and any the library never completes
       while (!in_flight.empty() && (in_flight.front().first->is_complete() || (now - in_flight.front().second > std::chrono::seconds(30))))
         in_flight.pop_front();
 
@@ -1529,15 +1460,9 @@ public:
         continue;
       if (in_flight.size() >= MAX_IN_FLIGHT)
       {
-        // Wait for the oldest to finish; wait_for() throws if its delivery failed
+        // Wait for the oldest to finish
         lock.unlock();
-        try
-        {
-          in_flight.front().first->wait_for(std::chrono::milliseconds(500));
-        }
-        catch (const mqtt::exception &)
-        {
-        }
+        in_flight.front().first->wait_for(std::chrono::milliseconds(500));
         lock.lock();
         continue;
       }
@@ -1546,7 +1471,7 @@ public:
       send_queue.pop_front();
       send_queue_bytes -= item.payload.size();
       lock.unlock();
-      mqtt::delivery_token_ptr tok = publish(item.topic, item.payload, mqtt_qos, item.retained);
+      Mqtt_Delivery_Ptr tok = transport->publish(item.topic, item.payload, mqtt_qos, item.retained);
       lock.lock();
 
       if (tok)
@@ -1568,21 +1493,29 @@ public:
     }
   }
 
-  // Paho mqtt::callbacks.
+  // Transport events, called on the transport's thread.
   //   Update mqtt_connected before logging; with console_logs the log message is sent over MQTT.
 
   // connection_lost()
-  //   Paho MQTT: This method is called if the connection to the broker is lost.
-  void connection_lost(const string &cause)
+  //   Called if the connection to the broker is lost.
+  void connection_lost(const std::string &cause)
   {
     mqtt_connected = false;
     BOOST_LOG_TRIVIAL(error) << log_prefix << "Lost connection to broker: " << mqtt_broker << " " << cause;
   }
 
+  // broker_disconnect()
+  //   Called when an MQTT 5 broker closes the connection, with its reason.
+  void broker_disconnect(const std::string &reason)
+  {
+    mqtt_connected = false;
+    BOOST_LOG_TRIVIAL(error) << log_prefix << "Broker closed the connection: " << reason;
+  }
+
   // connected()
-  //   Paho MQTT: This method is called if the connection to the broker is activated.
+  //   Called if the connection to the broker is activated.
   //   MQTT: topic_message/status/trunk_recorder/status
-  void connected(const string &cause)
+  void connected(const std::string &cause)
   {
     mqtt_connected = true;
 
