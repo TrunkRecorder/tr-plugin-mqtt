@@ -1,6 +1,7 @@
 // Boost.MQTT5 transport for the MQTT Status plugin
 // ********************************
 // Requires Boost 1.88 or later. MQTT 5 only.
+// WebSocket brokers (ws://, wss://) need MQTT_BOOST_WEBSOCKET; it roughly doubles compile RAM.
 // ********************************
 
 #include "mqtt_transport.h"
@@ -11,14 +12,17 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <boost/beast/websocket.hpp>
-#include <boost/beast/websocket/ssl.hpp>
 #include <boost/mqtt5/mqtt_client.hpp>
 #include <boost/mqtt5/reason_codes.hpp>
 #include <boost/mqtt5/ssl.hpp>
 #include <boost/mqtt5/types.hpp>
+
+#ifdef MQTT_BOOST_WEBSOCKET
+#include <boost/beast/websocket.hpp>
+#include <boost/beast/websocket/ssl.hpp>
 #include <boost/mqtt5/websocket.hpp>
 #include <boost/mqtt5/websocket_ssl.hpp>
+#endif
 
 #include <openssl/ssl.h>
 
@@ -214,10 +218,15 @@ class Boost_Transport : public Mqtt_Transport
     default_port = ws ? (tls ? 443 : 80) : (tls ? 8883 : 1883);
 
     Connection_Hooks hooks{this};
+#ifdef MQTT_BOOST_WEBSOCKET
     if (ws && tls)
       client.reset(new Client_Of<boost::beast::websocket::stream<tls_stream>, asio::ssl::context>(ioc, tls_context(), hooks));
     else if (ws)
       client.reset(new Client_Of<boost::beast::websocket::stream<tcp_stream>, std::monostate>(ioc, {}, hooks));
+#else
+    if (ws)
+      return "WebSocket brokers need the plugin built with -DMQTT_BOOST_WEBSOCKET=ON: " + settings.broker;
+#endif
     else if (tls)
       client.reset(new Client_Of<tls_stream, asio::ssl::context>(ioc, tls_context(), hooks));
     else
@@ -236,6 +245,8 @@ class Boost_Transport : public Mqtt_Transport
   // io thread
   void start()
   {
+    if (!client)
+      return;
     stopping = false;
     unsigned generation = ++run_generation;
     client->run(settings, hosts, default_port, [this, generation](mqtt5::error_code) { run_ended(generation); });
@@ -383,7 +394,7 @@ public:
     std::shared_ptr<Boost_Delivery> delivery = std::make_shared<Boost_Delivery>();
     asio::post(ioc, [this, delivery, topic, payload, qos, retained]() mutable
                {
-                 if (stopping)
+                 if (stopping || !client)
                    delivery->complete();
                  else
                    client->publish(std::move(topic), std::move(payload), qos, retained, delivery);
@@ -400,6 +411,12 @@ public:
                  stopping = true;
                  connected = false;
                  restart_timer.cancel();
+                 if (!client)
+                 {
+                   disconnecting = false;
+                   done->complete();
+                   return;
+                 }
                  client->disconnect([this, done]
                                     {
                                       disconnecting = false;

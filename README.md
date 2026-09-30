@@ -52,6 +52,13 @@ sudo cmake --build build/ --target install
 sudo ldconfig
 ```
 
+&emsp; **Alternative: Boost.MQTT5.** With Boost 1.88 or later, the plugin can be built without Paho. It then supports MQTT 5 only. Paho is used whenever it is installed; to choose explicitly, pass these options to Trunk Recorder's `cmake`:
+
+| Option | Default | Description |
+| ------ | ------- | ----------- |
+| `-DMQTT_LIBRARY=` | `auto` | `auto` (Paho if installed, otherwise Boost), `paho` or `boost` |
+| `-DMQTT_BOOST_WEBSOCKET=` | `OFF` | Boost only: support `ws://` and `wss://` brokers. Roughly doubles the memory needed to compile the plugin. |
+
 3. **Build and install the plugin:**
 
 &emsp; This pluigin source should be cloned into the `/user_plugins` directory of the Trunk Recorder 5.0+ source tree.  It will be built and installed along with Trunk Recorder.

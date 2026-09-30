@@ -2,6 +2,7 @@
 # "auto" uses paho when installed, otherwise Boost.MQTT5.
 set(MQTT_LIBRARY "auto" CACHE STRING "MQTT library for the MQTT Status plugin: auto, paho or boost")
 set_property(CACHE MQTT_LIBRARY PROPERTY STRINGS auto paho boost)
+option(MQTT_BOOST_WEBSOCKET "Boost.MQTT5 only: support ws:// and wss:// brokers (roughly doubles compile RAM)" OFF)
 
 find_package(eclipse-paho-mqtt-c QUIET)
 find_package(PahoMqttCpp QUIET)
@@ -15,10 +16,22 @@ if (MQTT_LIBRARY STREQUAL "paho" OR (MQTT_LIBRARY STREQUAL "auto" AND eclipse-pa
 elseif (BOOST_MQTT5_INCLUDE_DIR AND (MQTT_LIBRARY STREQUAL "boost" OR MQTT_LIBRARY STREQUAL "auto"))
   set(MQTT_TRANSPORT mqtt_transport_boost.cc)
   set(MQTT_LIBRARIES "")
+  if (MQTT_BOOST_WEBSOCKET)
+    set_source_files_properties(mqtt_transport_boost.cc PROPERTIES COMPILE_DEFINITIONS MQTT_BOOST_WEBSOCKET)
+  endif()
+  # Full debug info on these templates costs ~1 GB of compile RAM and ~60 MB of plugin size;
+  # line tables keep crash backtraces useful
+  if (CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(mqtt_transport_boost.cc PROPERTIES COMPILE_OPTIONS -g1)
+  endif()
 else()
   message(FATAL_ERROR "MQTT Status plugin: install the paho MQTT C++ library (libpaho-mqttpp-dev), or use Boost 1.88 or later")
 endif()
-message(STATUS "MQTT Status plugin: using ${MQTT_TRANSPORT}")
+if (MQTT_TRANSPORT STREQUAL "mqtt_transport_boost.cc" AND NOT MQTT_BOOST_WEBSOCKET)
+  message(STATUS "MQTT Status plugin: using ${MQTT_TRANSPORT} (no WebSocket brokers; enable with -DMQTT_BOOST_WEBSOCKET=ON)")
+else()
+  message(STATUS "MQTT Status plugin: using ${MQTT_TRANSPORT}")
+endif()
 
 add_library(mqtt_status_plugin
 MODULE
@@ -45,4 +58,3 @@ include_directories(
 endif()
 
 install(TARGETS mqtt_status_plugin LIBRARY DESTINATION ${CMAKE_INSTALL_PREFIX}/lib/trunk-recorder)
-
