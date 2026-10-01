@@ -23,6 +23,7 @@
   - [data](#data)
   - [ans\_req](#ans_req)
   - [location](#location)
+  - [call\_alert](#call_alert)
 - [Trunking Messages](#trunking-messages)
   - [messages](#messages)
 - [Console Messages](#console-messages)
@@ -1024,6 +1025,28 @@ location
               + talkgroup_description
               + talkgroup_group
               + talkgroup_tag
+```
+
+## call_alert
+
+P25 Call Alert: one unit paging another, with no audio. Requires a trunk-recorder newer than v5.2.1.
+
+`unit_topic/shortname/call_alert`
+
+```json
+{
+  "type": "call_alert",
+  "call_alert": {
+    "sys_num": 1,
+    "sys_name": "pscsite4",
+    "unit": 4810011,
+    "unit_alpha_tag": "",
+    "target_unit": 4811289,
+    "target_unit_alpha_tag": ""
+  },
+  "timestamp": 1775874479,
+  "instance_id": "east-antenna"
+}
 ```
 
 # Trunking Messages

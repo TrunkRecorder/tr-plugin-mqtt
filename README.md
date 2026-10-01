@@ -157,6 +157,7 @@ The plugin will provide the following messages to the MQTT broker depending on c
 | unit_topic/shortname    | [data](./example_messages.md#data)                 |          | Unit data grant                                                    |
 | unit_topic/shortname    | [ans_req](./example_messages.md#ans_req)           |          | Unit answer request                                                |
 | unit_topic/shortname    | [location](./example_messages.md#location)         |          | Unit location update                                               |
+| unit_topic/shortname    | [call_alert](./example_messages.md#call_alert)     |          | Unit-to-unit page (P25 Call Alert); trunk-recorder after v5.2.1    |
 | message_topic/shortname | [messages](./example_messages.md#messages)         |          | Trunking messages                                                  |
 
 \* Some messages have been changed for consistency. Please see links for examples and notes.  

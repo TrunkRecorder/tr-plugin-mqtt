@@ -186,6 +186,7 @@ class Mqtt_Status : public Plugin_Api
       {13, "UU_ANS_REQ"},
       {14, "UU_V_GRANT"},
       {15, "UU_V_UPDATE"},
+      {18, "CALL_ALERT"},
       {99, "UNKNOWN"}};
 
   std::map<short, std::string> tr_state = {
@@ -729,6 +730,27 @@ public:
     {
       nlohmann::ordered_json unit_json = get_unit_tg_json(sys, source_id, talkgroup_num);
       return send_json(unit_json, "ans_req", "ans_req", topic_unit + "/" + sys->get_short_name().c_str(), false);
+    }
+    return 0;
+  }
+
+  // unit_call_alert()
+  //   Directed unit-to-unit page (call_alert)
+  //   TRUNK-RECORDER PLUGIN API: Called each CALL_ALERT message
+  //   MQTT: topic_unit/shortname/call_alert
+  //   Not marked override: the hook is newer than trunk-recorder v5.2.1, and older versions would fail to build.
+  int unit_call_alert(System *sys, long source_id, long target_unit)
+  {
+    if (unit_enabled)
+    {
+      nlohmann::ordered_json unit_json = {
+          {"sys_num", sys->get_sys_num()},
+          {"sys_name", sys->get_short_name()},
+          {"unit", source_id},
+          {"unit_alpha_tag", sys->find_unit_tag(source_id)},
+          {"target_unit", target_unit},
+          {"target_unit_alpha_tag", sys->find_unit_tag(target_unit)}};
+      return send_json(unit_json, "call_alert", "call_alert", topic_unit + "/" + sys->get_short_name().c_str(), false);
     }
     return 0;
   }
