@@ -186,6 +186,8 @@ class Mqtt_Status : public Plugin_Api
       {13, "UU_ANS_REQ"},
       {14, "UU_V_GRANT"},
       {15, "UU_V_UPDATE"},
+      {16, "INVALID_CC_MESSAGE"},
+      {17, "TDULC"},
       {18, "CALL_ALERT"},
       {99, "UNKNOWN"}};
 
