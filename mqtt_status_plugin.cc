@@ -186,6 +186,7 @@ class Mqtt_Status : public Plugin_Api
       {13, "UU_ANS_REQ"},
       {14, "UU_V_GRANT"},
       {15, "UU_V_UPDATE"},
+      {18, "CALL_ALERT"},
       {99, "UNKNOWN"}};
 
   std::map<short, std::string> tr_state = {
@@ -737,7 +738,8 @@ public:
   //   Directed unit-to-unit page (call_alert)
   //   TRUNK-RECORDER PLUGIN API: Called each CALL_ALERT message
   //   MQTT: topic_unit/shortname/call_alert
-  int unit_call_alert(System *sys, long source_id, long target_unit) override
+  //   Not marked override: the hook is newer than trunk-recorder v5.2.1, and older versions would fail to build.
+  int unit_call_alert(System *sys, long source_id, long target_unit)
   {
     if (unit_enabled)
     {
