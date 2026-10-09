@@ -4,13 +4,18 @@ set(MQTT_LIBRARY "auto" CACHE STRING "MQTT library for the MQTT Status plugin: a
 set_property(CACHE MQTT_LIBRARY PROPERTY STRINGS auto paho boost)
 option(MQTT_BOOST_WEBSOCKET "Boost.MQTT5 only: support ws:// and wss:// brokers (roughly doubles compile RAM)" OFF)
 
-find_package(eclipse-paho-mqtt-c QUIET)
-find_package(PahoMqttCpp QUIET)
-find_path(BOOST_MQTT5_INCLUDE_DIR boost/mqtt5.hpp HINTS ${Boost_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
-
-if (MQTT_LIBRARY STREQUAL "paho" OR (MQTT_LIBRARY STREQUAL "auto" AND eclipse-paho-mqtt-c_FOUND AND PahoMqttCpp_FOUND))
+# Find each paho package only once: paho-cpp 1.2.x (Ubuntu 24.04, Debian 12) defines
+# PahoMqttC::PahoMqttC without a guard, so a second find_package() fails
+if (MQTT_LIBRARY STREQUAL "paho")
   find_package(eclipse-paho-mqtt-c REQUIRED)
   find_package(PahoMqttCpp REQUIRED)
+elseif (MQTT_LIBRARY STREQUAL "auto")
+  find_package(eclipse-paho-mqtt-c QUIET)
+  find_package(PahoMqttCpp QUIET)
+endif()
+find_path(BOOST_MQTT5_INCLUDE_DIR boost/mqtt5.hpp HINTS ${Boost_INCLUDE_DIRS} ${Boost_INCLUDE_DIR})
+
+if (eclipse-paho-mqtt-c_FOUND AND PahoMqttCpp_FOUND)
   set(MQTT_TRANSPORT mqtt_transport_paho.cc)
   set(MQTT_LIBRARIES eclipse-paho-mqtt-c::paho-mqtt3as PahoMqttCpp::paho-mqttpp3)
 elseif (BOOST_MQTT5_INCLUDE_DIR AND (MQTT_LIBRARY STREQUAL "boost" OR MQTT_LIBRARY STREQUAL "auto"))
